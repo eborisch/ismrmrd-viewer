@@ -16,6 +16,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self.container = container
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(2,2,2,2)
         self.fig = Figure(figsize=(self.width(), self.height()), dpi=72, facecolor=(1,1,1), edgecolor=(0,0,0))
         self.ax = self.fig.add_subplot(111)
         logging.info("Image constructor.")

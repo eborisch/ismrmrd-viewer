@@ -15,16 +15,29 @@ class ImageViewer(QtWidgets.QWidget):
         super().__init__()
 
         self.container = container
-
-        logging.info("Image constructor.")
-        image = numpy.array(container.images.to_numpy(container.images[0])[1][0][0])
         layout = QtWidgets.QVBoxLayout(self)
-        fig = Figure(figsize=(self.width(), self.height()), dpi=72, facecolor=(1,1,1), edgecolor=(0,0,0))
-        fig.add_subplot(111)
-
-        #matplotlib.pyplot.imshow(image, vmin=image.min(), vmax=image.max())
-        matplotlib.pyplot.plot([0, 1, 2], [0, 1, 0])
-        fig.draw()
-        canvas = FigureCanvas(fig)
+        self.fig = Figure(figsize=(self.width(), self.height()), dpi=72, facecolor=(1,1,1), edgecolor=(0,0,0))
+        self.ax = self.fig.add_subplot(111)
+        logging.info("Image constructor.")
+        canvas = FigureCanvas(self.fig)
         layout.addWidget(canvas) 
+        self.min = None
+        self.max = None
+        self.vmin = None
+        self.vmaz = None
+        self.update_image()
+
         #pdb.set_trace()
+
+    def update_image(self, n=0, c=0, z=0):
+        image = numpy.array(self.container.images.to_numpy(self.container.images[n])[1][c][z])
+        if self.min is None:
+            self.min = image.min()
+            self.vmin = self.min
+            self.max = image.max()
+            self.vmax = self.max
+        self.ax.imshow(image, 
+                       vmin=image.min(),
+                       vmax=image.max(),
+                       cmap=matplotlib.pyplot.get_cmap('gray'))
+        

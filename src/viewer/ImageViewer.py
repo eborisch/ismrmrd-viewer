@@ -36,8 +36,11 @@ class ImageViewer(QtWidgets.QWidget):
             self.vmin = self.min
             self.max = image.max()
             self.vmax = self.max
+
         self.ax.imshow(image, 
                        vmin=image.min(),
                        vmax=image.max(),
                        cmap=matplotlib.pyplot.get_cmap('gray'))
-        
+
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])        

@@ -43,8 +43,8 @@ class ImageViewer(QtWidgets.QWidget):
             self.mloc = (newx, newy)
             return 
         
-        self.window = self.window + (newx - self.mloc[0]) * 0.001
-        self.level = self.level + (newy - self.mloc[1]) * 0.001
+        self.window = self.window - (newx - self.mloc[0]) * 0.01
+        self.level = self.level - (newy - self.mloc[1]) * 0.01
         if self.window < 0:
             self.window = 0.0
         if self.window > 2:
@@ -57,7 +57,7 @@ class ImageViewer(QtWidgets.QWidget):
         rng = self.window_level()
         self.image.set_clim(*rng)        
 
-        self.mlog = (newx, newy)
+        self.mloc = (newx, newy)
         self.canvas.draw()
 
     def mouseReleaseEvent(self, event):

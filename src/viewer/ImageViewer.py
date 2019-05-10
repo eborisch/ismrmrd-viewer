@@ -22,6 +22,7 @@ class ImageViewer(QTW.QWidget):
         super().__init__()
 
         self.container = container
+        logging.info("Image constructor.")
 
         # Main layout
         layout = QTW.QVBoxLayout(self)
@@ -32,6 +33,7 @@ class ImageViewer(QTW.QWidget):
         cw = QTW.QWidget()
         layout.addWidget(cw)
         controls = QTW.QHBoxLayout(cw)
+        controls.setContentsMargins(0,0,0,0)
 
         # Create a drop-down for the image instance
         self.selected = {}
@@ -51,6 +53,27 @@ class ImageViewer(QTW.QWidget):
         controls.addWidget(self.animDim)
 
         self.animate.stateChanged.connect(self.animation)
+        self.animDim.currentIndexChanged.connect(self.check_dim)
+
+        # Window/level controls; Add a widget with a horizontal layout
+        # NOTE: we re-use the local names from above...
+        cw = QTW.QWidget()
+        layout.addWidget(cw)
+        controls = QTW.QHBoxLayout(cw)
+        controls.setContentsMargins(0,0,0,0)
+
+        self.windowScaled = QTW.QDoubleSpinBox()
+        self.windowScaled.setRange(-2**31, 2**31 - 1)
+        self.levelScaled = QTW.QDoubleSpinBox()
+        self.levelScaled.setRange(-2**31, 2**31 - 1)
+        controls.addWidget(QTW.QLabel("Window:"))
+        controls.addWidget(self.windowScaled)
+        controls.addWidget(QTW.QLabel("Level:"))
+        controls.addWidget(self.levelScaled)
+
+
+        self.windowScaled.valueChanged.connect(self.window_input)
+        self.levelScaled.valueChanged.connect(self.level_input)
 
         layout.setContentsMargins(0,0,0,0)
         self.fig = Figure(figsize=(6,6),
@@ -60,7 +83,6 @@ class ImageViewer(QTW.QWidget):
                           tight_layout=True)
 
         self.ax = self.fig.add_subplot(111)
-        logging.info("Image constructor.")
         self.canvas = FigureCanvas(self.fig)
         self.canvas.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
         self.canvas.setSizePolicy(QTW.QSizePolicy.Expanding,
@@ -68,6 +90,9 @@ class ImageViewer(QTW.QWidget):
         layout.addWidget(self.canvas) 
         
         self.stack = numpy.array(self.container.images.data)
+        if self.stack.shape[0] == 1:
+            self.animate.setEnabled(False)
+            
         #pdb.set_trace()
 
         # Window/Level support
@@ -78,10 +103,12 @@ class ImageViewer(QTW.QWidget):
         self.level = 0.5
         self.mloc = None
 
+        # For animation
+        self.timer = None
+
         self.selected['Channel'].setMaximum(len(self.stack[0]) - 1)
         self.selected['Slice'].setMaximum(len(self.stack[0][0]) - 1)
 
-        #self.installEventFilter(self)
         self.update_image()
 
     def frame(self):
@@ -92,6 +119,17 @@ class ImageViewer(QTW.QWidget):
 
     def slice(self):
         return self.selected['Slice'].value()
+
+    def check_dim(self, v):
+        self.animate.setEnabled(self.stack.shape[v] > 1)
+
+    def window_input(self, value, **kwargs):
+        self.window = value / self.range 
+        self.update_image()
+
+    def level_input(self, value):
+        self.level = value / self.range 
+        self.update_image()
 
     def mouseMoveEvent(self, event):
         "Provides window/level behavior."
@@ -104,7 +142,7 @@ class ImageViewer(QTW.QWidget):
         # Modify mapping and polarity as desired
         self.window = self.window - (newx - self.mloc[0]) * 0.01
         self.level = self.level - (newy - self.mloc[1]) * 0.01
-        
+
         # Don't invert
         if self.window < 0:
             self.window = 0.0
@@ -116,6 +154,12 @@ class ImageViewer(QTW.QWidget):
         if self.level > 1:
             self.level = 1.0
 
+        for (cont, var) in ((self.windowScaled, self.window),
+                            (self.levelScaled, self.level)):
+            cont.blockSignals(True)
+            cont.setValue(var * self.range)
+            cont.blockSignals(False)
+
         rng = self.window_level()
         self.image.set_clim(*rng)        
 #
@@ -126,16 +170,16 @@ class ImageViewer(QTW.QWidget):
         "Reset .mloc to indicate we are done with one click/drag operation"
         self.mloc = None
 
-#    def eventFilter(self, obj, event):
-#        # Want to process resize first
-#        handled = QTW.QWidget.eventFilter(self, obj, event)
-#        if event.type() == QtCore.QEvent.Resize:
-#            #self.fig.set_size_inches(self.width() / 72,
-#            #                         self.height() / 72)
-#            return handled
-#        else:
-#            return handled
-
+    def wheelEvent(self, event):
+        "Handle scroll event; could use some time-based limiting."
+        control = self.selected['Instance']
+        if event.delta() > 0:
+            new_v = control.value() + 1
+        elif event.delta() < 0:
+            new_v = control.value() - 1
+        else:
+            return
+        control.setValue(new_v % self.stack.shape[0])
 
     def window_level(self):
         return (self.level * self.range 
@@ -144,8 +188,6 @@ class ImageViewer(QTW.QWidget):
                   + self.window / 2 * self.range + self.min)
     
     def update_image(self, slice_n=None, animated=False):
-        image = self.stack[self.frame()][self.coil()][self.slice()]
-
         wl = self.window_level()
         self.ax.clear()
         kwargs = {}
@@ -158,21 +200,28 @@ class ImageViewer(QTW.QWidget):
         self.ax.set_xticks([])
         self.ax.set_yticks([])
         if animated is False:
-            self.canvas.draw_idle()
+            self.canvas.draw()
 
     def animation(self):
         if self.animate.isChecked() is False:
-            self.timer.stop()
-            self.timer = None
+            if self.timer:
+                self.timer.stop()
+                self.timer = None
+            return
         
         dimName = self.animDim.currentText()
+
+        if self.selected[dimName].maximum() == 0:
+            logging.warn("Cannot animate singleton dimension.")
+            self.animate.setChecked(False)
+            return
 
         def increment():
             v = self.selected[dimName].value()
             m = self.selected[dimName].maximum()
             self.selected[dimName].setValue((v+1) % m)
 
-        self.timer = QtCore.QTimer(this)
+        self.timer = QtCore.QTimer(self)
         self.timer.interval = 100
         self.timer.timeout.connect(increment)
-        timer.start()
+        self.timer.start()

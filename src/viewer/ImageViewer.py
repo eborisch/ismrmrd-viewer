@@ -1,15 +1,18 @@
 import logging
 import numpy
 import pdb
-import matplotlib.pyplot
+import matplotlib.pyplot as pyplot
+import matplotlib.animation as animation
 
-from PySide2 import QtCore, QtWidgets as QTW
+from PySide2 import QtCore, QtGui, QtWidgets as QTW
 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+DIMS = ('Instance', 'Channel', 'Slice')
 
 class ImageViewer(QTW.QWidget):
+
     def __init__(self, container):
         """
         Stores off container for later use; sets up the main panel display
@@ -32,23 +35,36 @@ class ImageViewer(QTW.QWidget):
 
         # Create a drop-down for the image instance
         self.selected = {}
-        for dim in ('Instance', 'Coil', 'Slice'):
+        for dim in DIMS:
             controls.addWidget(QTW.QLabel("{}:".format(dim)))
             self.selected[dim] = QTW.QSpinBox()
             controls.addWidget(self.selected[dim])
             self.selected[dim].valueChanged.connect(self.update_image)
         self.selected['Instance'].setMaximum(self.nimg - 1)
 
+        self.animate = QTW.QCheckBox("Animate")
+        controls.addWidget(self.animate)
+
+        self.animDim = QTW.QComboBox()
+        for dim in DIMS:
+            self.animDim.addItem(dim)
+        controls.addWidget(self.animDim)
+
+        self.animate.stateChanged.connect(self.animation)
+
         layout.setContentsMargins(0,0,0,0)
-        self.fig = Figure(figsize=(8,8),
+        self.fig = Figure(figsize=(6,6),
                           dpi=72,
                           facecolor=(1,1,1),
-                          edgecolor=(0,0,0))
+                          edgecolor=(0,0,0),
+                          tight_layout=True)
 
         self.ax = self.fig.add_subplot(111)
         logging.info("Image constructor.")
         self.canvas = FigureCanvas(self.fig)
         self.canvas.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+        self.canvas.setSizePolicy(QTW.QSizePolicy.Expanding,
+                                  QTW.QSizePolicy.Expanding)
         layout.addWidget(self.canvas) 
         
         self.stack = numpy.array(self.container.images.data)
@@ -62,16 +78,17 @@ class ImageViewer(QTW.QWidget):
         self.level = 0.5
         self.mloc = None
 
-        self.selected['Coil'].setMaximum(len(self.stack[0]) - 1)
+        self.selected['Channel'].setMaximum(len(self.stack[0]) - 1)
         self.selected['Slice'].setMaximum(len(self.stack[0][0]) - 1)
 
+        #self.installEventFilter(self)
         self.update_image()
 
     def frame(self):
         return self.selected['Instance'].value()
 
     def coil(self):
-        return self.selected['Coil'].value()
+        return self.selected['Channel'].value()
 
     def slice(self):
         return self.selected['Slice'].value()
@@ -99,11 +116,9 @@ class ImageViewer(QTW.QWidget):
         if self.level > 1:
             self.level = 1.0
 
-        #print("{},{}".format(self.window, self.level)) 
-
         rng = self.window_level()
         self.image.set_clim(*rng)        
-
+#
         self.mloc = (newx, newy)
         self.canvas.draw()
 
@@ -111,23 +126,68 @@ class ImageViewer(QTW.QWidget):
         "Reset .mloc to indicate we are done with one click/drag operation"
         self.mloc = None
 
+#    def eventFilter(self, obj, event):
+#        # Want to process resize first
+#        handled = QTW.QWidget.eventFilter(self, obj, event)
+#        if event.type() == QtCore.QEvent.Resize:
+#            #self.fig.set_size_inches(self.width() / 72,
+#            #                         self.height() / 72)
+#            return handled
+#        else:
+#            return handled
+
+
     def window_level(self):
         return (self.level * self.range 
                   - self.window / 2 * self.range + self.min, 
                 self.level * self.range
                   + self.window / 2 * self.range + self.min)
     
-    def update_image(self):
+    def update_image(self, slice_n=None, animated=False):
         image = self.stack[self.frame()][self.coil()][self.slice()]
 
         wl = self.window_level()
         self.ax.clear()
+        kwargs = {}
         self.image = \
             self.ax.imshow(self.stack[self.frame()][self.coil()][self.slice()], 
-                           vmin=wl[0], 
-                           vmax=wl[1], 
-                           cmap=matplotlib.pyplot.get_cmap('gray'))
-
+                           vmin=wl[0],
+                           vmax=wl[1],
+                           cmap=pyplot.get_cmap('gray'),
+                           animated=animated)
         self.ax.set_xticks([])
-        self.ax.set_yticks([])        
-        self.canvas.draw()
+        self.ax.set_yticks([])
+        if animated is False:
+            self.canvas.draw_idle()
+
+    def animation(self):
+        if self.animate.isChecked() is False:
+            self.ani.event_source.stop()
+            self.fig.clf()
+            self.ax = self.fig.add_subplot(111)
+            return self.update_image()
+        
+        dimSel = self.animDim.currentIndex()
+        dimName = self.animDim.currentText()
+
+        saved = self.selected[dimName].value()
+        self.selected[dimName].blockSignals(True)
+
+        imagestack = []
+
+        for n in range(self.stack.shape[dimSel]):
+            self.selected[dimName].setValue(n)
+            self.update_image(None, animated=True)
+            imagestack.append([self.image])
+
+        self.ani = animation.ArtistAnimation(self.fig,
+                                             imagestack,
+                                             interval=100,
+                                             blit=True,
+                                             repeat_delay=0)
+
+
+        self.selected[dimName].setValue(saved)
+        self.selected[dimName].blockSignals(False)
+
+        self.canvas.draw()        

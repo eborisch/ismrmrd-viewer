@@ -162,32 +162,17 @@ class ImageViewer(QTW.QWidget):
 
     def animation(self):
         if self.animate.isChecked() is False:
-            self.ani.event_source.stop()
-            self.fig.clf()
-            self.ax = self.fig.add_subplot(111)
-            return self.update_image()
+            self.timer.stop()
+            self.timer = None
         
-        dimSel = self.animDim.currentIndex()
         dimName = self.animDim.currentText()
 
-        saved = self.selected[dimName].value()
-        self.selected[dimName].blockSignals(True)
+        def increment():
+            v = self.selected[dimName].value()
+            m = self.selected[dimName].maximum()
+            self.selected[dimName].setValue((v+1) % m)
 
-        imagestack = []
-
-        for n in range(self.stack.shape[dimSel]):
-            self.selected[dimName].setValue(n)
-            self.update_image(None, animated=True)
-            imagestack.append([self.image])
-
-        self.ani = animation.ArtistAnimation(self.fig,
-                                             imagestack,
-                                             interval=100,
-                                             blit=True,
-                                             repeat_delay=0)
-
-
-        self.selected[dimName].setValue(saved)
-        self.selected[dimName].blockSignals(False)
-
-        self.canvas.draw()        
+        self.timer = QtCore.QTimer(this)
+        self.timer.interval = 100
+        self.timer.timeout.connect(increment)
+        timer.start()
